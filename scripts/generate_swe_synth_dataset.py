@@ -14,7 +14,9 @@ Output: JSON lines or JSON array with {"instruction": problem_statement, "respon
 
 import argparse
 import json
+import logging
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -26,21 +28,37 @@ except ImportError:
 DEFAULT_R2_URL = "https://pub-4b43a94ed07d4ac38fae3f4cb5070d6c.r2.dev"
 DEFAULT_R2_PREFIX = "bugs"
 
+# Logging
+LOG = logging.getLogger(__name__)
 
-def load_task_from_r2(task_id: int, base_url: str, prefix: str, timeout: int = 30) -> dict | None:
-    """Load a single task JSON from R2 by task_id."""
+
+def load_task_from_r2(
+    task_id: int,
+    base_url: str,
+    prefix: str,
+    timeout: int = 30,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+) -> dict | None:
+    """Load a single task JSON from R2 by task_id, with retries and backoff."""
     if not httpx:
         raise RuntimeError("Install httpx: pip install httpx")
     key = f"{prefix}/task_{task_id:011d}.json"
     url = f"{base_url.rstrip('/')}/{key}"
-    try:
-        r = httpx.get(url, timeout=timeout)
-        if r.status_code == 200 and r.content:
-            return r.json()
-        return None
-    except Exception as e:
-        print(f"Warning: task {task_id} failed: {e}", file=sys.stderr)
-        return None
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = httpx.get(url, timeout=timeout)
+            if r.status_code == 200 and r.content:
+                return r.json()
+            last_error = f"HTTP {r.status_code}"
+        except Exception as e:
+            last_error = e
+        if attempt < max_retries:
+            LOG.warning("Task %s attempt %s/%s failed (%s), retrying in %.1fs ...", task_id, attempt, max_retries, last_error, retry_delay)
+            time.sleep(retry_delay)
+    LOG.warning("Task %s failed after %s attempts: %s", task_id, max_retries, last_error)
+    return None
 
 
 def load_task_from_local(task_id: int, cache_dir: Path) -> dict | None:
@@ -117,7 +135,41 @@ def main():
         action="store_true",
         help="Write JSONL (one JSON object per line) instead of a single JSON array",
     )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Max retries per task when fetching from R2 (default: 3)",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=2.0,
+        metavar="SEC",
+        help="Seconds to wait between retries (default: 2.0)",
+    )
+    parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=0.5,
+        metavar="SEC",
+        help="Seconds to wait between requests (avoid rate limit; default: 0.5)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose logging (INFO level)",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
 
     start, end = 0, 99
     if args.task_range:
@@ -130,19 +182,36 @@ def main():
     if start > end:
         start, end = end, start
 
+    total_tasks = end - start + 1
+    LOG.info("Task range: %s-%s (%s tasks), source=%s", start, end, total_tasks, args.source)
+    if args.source == "r2":
+        LOG.info("Retries=%s, retry_delay=%.1fs, request_delay=%.1fs", args.retries, args.retry_delay, args.request_delay)
+
     examples = []
-    for task_id in range(start, end + 1):
+    for i, task_id in enumerate(range(start, end + 1), 1):
+        LOG.info("Fetching task %s (%s/%s) ...", task_id, i, total_tasks)
         if args.source == "r2":
-            task = load_task_from_r2(task_id, args.r2_url, args.r2_prefix)
+            task = load_task_from_r2(
+                task_id,
+                args.r2_url,
+                args.r2_prefix,
+                max_retries=args.retries,
+                retry_delay=args.retry_delay,
+            )
+            if task_id > start:
+                time.sleep(args.request_delay)
         else:
             task = load_task_from_local(task_id, args.local_cache)
         if task is None:
+            LOG.debug("Task %s: no data", task_id)
             continue
         ex = task_to_instruction_response(task)
         if ex is None:
+            LOG.debug("Task %s: skipped (missing problem_statement or gold_patch)", task_id)
             continue
         ex["task_id"] = task_id
         examples.append(ex)
+        LOG.info("Task %s: ok (examples so far: %s)", task_id, len(examples))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.jsonl:
@@ -153,7 +222,7 @@ def main():
         with open(args.output, "w", encoding="utf-8") as f:
             json.dump(examples, f, indent=2, ensure_ascii=False)
 
-    print(f"Wrote {len(examples)} examples to {args.output}", file=sys.stderr)
+    LOG.info("Done. Wrote %s examples to %s", len(examples), args.output)
 
 
 if __name__ == "__main__":
