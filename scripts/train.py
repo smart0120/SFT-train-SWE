@@ -146,6 +146,16 @@ def main(config_path: str | None = None):
         dataset_path=dataset_path,
         data_files=dataset_cfg.get("data_files"),
     )
+    validation_ratio = float(training_cfg.get("validation_ratio", 0))
+    if validation_ratio > 0 and validation_ratio < 1:
+        split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
+        dataset = split["train"]
+        eval_dataset = split["test"]
+        print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
+    else:
+        eval_dataset = None
+        if validation_ratio != 0:
+            print("validation_ratio must be in (0, 1); skipping validation.")
     system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
     instance_template = dataset_cfg.get("instance_template")
     format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
@@ -187,6 +197,11 @@ def main(config_path: str | None = None):
         report_to=report_to,
         run_name=run_name,
     )
+    if eval_dataset is not None:
+        _common_args["eval_strategy"] = training_cfg.get("eval_strategy", "steps")
+        _common_args["eval_steps"] = training_cfg.get("eval_steps", 100)
+    else:
+        _common_args["eval_strategy"] = "no"
     if SFTConfig is not None:
         sft_config = SFTConfig(
             **_common_args,
@@ -204,6 +219,7 @@ def main(config_path: str | None = None):
         model=model,
         args=sft_config,
         train_dataset=dataset,
+        eval_dataset=eval_dataset,
         processing_class=tokenizer,
         formatting_func=formatting_func,
         callbacks=callbacks,

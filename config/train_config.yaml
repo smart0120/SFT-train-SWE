@@ -59,6 +59,10 @@ training:
   truncation_side: "right"
   packing: false
   report_to: "wandb"
+  # Validation: split train data by ratio and run eval every eval_steps
+  validation_ratio: 0.1   # 0 = no validation; e.g. 0.1 = 10% for eval
+  eval_strategy: "steps"  # "steps" or "epoch" or "no"
+  eval_steps: 5         # run validation every N steps (if eval_strategy: "steps")
   # For loss vs epoch: in wandb add chart with x-axis "epoch", y-axis "train/loss_epoch"
   wandb_project: "sft-lora"
   wandb_entity: null
