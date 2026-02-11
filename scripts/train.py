@@ -33,6 +33,7 @@ except ImportError:
 
 from src.config_loader import load_config
 from src.data_utils import load_and_prepare_dataset, format_instruction
+from datasets import load_from_disk
 
 
 def _from_pretrained_causal_lm(model_id, **kwargs):
@@ -138,36 +139,51 @@ def main(config_path: str | None = None):
     dataset_path = paths.get("dataset_path") or dataset_cfg.get("dataset_path")
     if dataset_path and not Path(dataset_path).is_absolute():
         dataset_path = str(ROOT / dataset_path)
-    dataset = load_and_prepare_dataset(
-        dataset_name=dataset_cfg["name"],
-        split=dataset_cfg.get("split", "train"),
-        instruction_column=dataset_cfg.get("instruction_column", "instruction"),
-        response_column=dataset_cfg.get("response_column", "response"),
-        dataset_path=dataset_path,
-        data_files=dataset_cfg.get("data_files"),
-    )
-    validation_ratio = float(training_cfg.get("validation_ratio", 0))
-    if validation_ratio > 0 and validation_ratio < 1:
-        split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
-        dataset = split["train"]
-        eval_dataset = split["test"]
-        print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
-    else:
-        eval_dataset = None
-        if validation_ratio != 0:
-            print("validation_ratio must be in (0, 1); skipping validation.")
-    system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
-    instance_template = dataset_cfg.get("instance_template")
-    format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+    use_text_column = dataset_cfg.get("use_text_column", False)
 
-    def formatting_func(example):
-        return format_instruction(
-            example,
-            tokenizer,
-            system_prompt=system_prompt,
-            instance_template=instance_template,
-            format_response_agent_style=format_response_agent_style,
+    if use_text_column:
+        # Pre-formatted dataset with "text" column (e.g. from scripts/prepare_swe_for_qwen.py)
+        print(f"Loading pre-formatted dataset from {dataset_path} (dataset_text_field='text')")
+        dataset = load_from_disk(dataset_path)
+        eval_dataset = None
+        validation_ratio = float(training_cfg.get("validation_ratio", 0))
+        if validation_ratio > 0 and validation_ratio < 1:
+            split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
+            dataset = split["train"]
+            eval_dataset = split["test"]
+            print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
+        formatting_func = None
+    else:
+        dataset = load_and_prepare_dataset(
+            dataset_name=dataset_cfg["name"],
+            split=dataset_cfg.get("split", "train"),
+            instruction_column=dataset_cfg.get("instruction_column", "instruction"),
+            response_column=dataset_cfg.get("response_column", "response"),
+            dataset_path=dataset_path,
+            data_files=dataset_cfg.get("data_files"),
         )
+        validation_ratio = float(training_cfg.get("validation_ratio", 0))
+        if validation_ratio > 0 and validation_ratio < 1:
+            split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
+            dataset = split["train"]
+            eval_dataset = split["test"]
+            print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
+        else:
+            eval_dataset = None
+            if validation_ratio != 0:
+                print("validation_ratio must be in (0, 1); skipping validation.")
+        system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
+        instance_template = dataset_cfg.get("instance_template")
+        format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+
+        def formatting_func(example):
+            return format_instruction(
+                example,
+                tokenizer,
+                system_prompt=system_prompt,
+                instance_template=instance_template,
+                format_response_agent_style=format_response_agent_style,
+            )
 
     # Wandb: set env from config so report_to="wandb" uses correct project/entity
     wandb_project = training_cfg.get("wandb_project")
@@ -187,6 +203,7 @@ def main(config_path: str | None = None):
         per_device_train_batch_size=training_cfg.get("per_device_train_batch_size", 2),
         gradient_accumulation_steps=training_cfg.get("gradient_accumulation_steps", 4),
         learning_rate=float(training_cfg.get("learning_rate", 2e-4)),
+        weight_decay=float(training_cfg.get("weight_decay", 0.01)),
         fp16=training_cfg.get("fp16", False),
         bf16=training_cfg.get("bf16", True),
         logging_steps=training_cfg.get("logging_steps", 10),
@@ -215,15 +232,19 @@ def main(config_path: str | None = None):
     if report_to == "wandb":
         callbacks.append(WandbEpochLossCallback())
 
-    trainer = SFTTrainer(
+    trainer_kw = dict(
         model=model,
         args=sft_config,
         train_dataset=dataset,
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
-        formatting_func=formatting_func,
         callbacks=callbacks,
     )
+    if use_text_column:
+        trainer_kw["dataset_text_field"] = "text"
+    else:
+        trainer_kw["formatting_func"] = formatting_func
+    trainer = SFTTrainer(**trainer_kw)
 
     trainer.train()
     trainer.save_model(str(run_adapter_dir))

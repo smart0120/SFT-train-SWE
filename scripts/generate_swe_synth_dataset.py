@@ -70,23 +70,36 @@ def load_task_from_local(task_id: int, cache_dir: Path) -> dict | None:
         return json.load(f)
 
 
-def task_to_instruction_response(task: dict) -> dict | None:
-    """
-    Convert SWE-SYNTH task (BreakerOutput-like dict) to SFT example.
+def _normalize_instruction(text: str) -> str:
+    """Strip whitespace and optional surrounding double quotes from problem_statement."""
+    s = (text or "").strip()
+    if len(s) >= 2 and s.startswith('"') and s.endswith('"'):
+        s = s[1:-1].strip()
+    return s
 
-    - instruction: problem_statement (the task / eval description)
-    - response: gold_patch (the correct fix)
+
+def task_to_instruction_response(task: dict, task_id: int | None = None) -> dict | None:
+    """
+    Convert SWE-SYNTH task (BreakerOutput-like dict) to SFT example for swe_synth_train.json.
+
+    Output format: {"instruction": problem_statement, "response": gold_patch, "task_id": task_id}
+    - instruction: problem_statement (user-facing task / bug description), normalized
+    - response: gold_patch (unified diff, the correct fix)
+    - task_id: optional, for tracing back to the source task
     """
     bug = task.get("bug", {})
     original = task.get("original", {})
-    problem_statement = bug.get("problem_statement", "").strip()
-    gold_patch = original.get("gold_patch", "").strip()
+    problem_statement = _normalize_instruction(bug.get("problem_statement", "") or "")
+    gold_patch = (original.get("gold_patch", "") or "").strip()
     if not problem_statement or not gold_patch:
         return None
-    return {
+    out = {
         "instruction": problem_statement,
         "response": gold_patch,
     }
+    if task_id is not None:
+        out["task_id"] = task_id
+    return out
 
 
 def main():
@@ -205,11 +218,10 @@ def main():
         if task is None:
             LOG.debug("Task %s: no data", task_id)
             continue
-        ex = task_to_instruction_response(task)
+        ex = task_to_instruction_response(task, task_id=task_id)
         if ex is None:
             LOG.debug("Task %s: skipped (missing problem_statement or gold_patch)", task_id)
             continue
-        ex["task_id"] = task_id
         examples.append(ex)
         LOG.info("Task %s: ok (examples so far: %s)", task_id, len(examples))
 

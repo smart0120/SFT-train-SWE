@@ -16,5 +16,9 @@ wandb>=0.16.0
 # SWE-SYNTH dataset generator (optional)
 httpx>=0.25.0
 
+# SWE Qwen preparation (repo clone + code context)
+gitpython>=3.1.0
+tqdm>=4.65.0
+
 # Web UI for chat (optional)
 gradio>=4.0.0

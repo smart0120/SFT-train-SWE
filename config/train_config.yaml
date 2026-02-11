@@ -25,6 +25,9 @@ dataset:
   # Load system/instance templates from SWE-SYNTH config (agent section)
   swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"
   format_response_agent_style: true
+  # Pre-formatted "text" dataset (from scripts/prepare_swe_for_qwen.py): set to true and
+  # paths.dataset_path to the saved HF dataset dir (e.g. data/swe_qwen_dataset)
+  use_text_column: false
 
 # --- LoRA (4B, small dataset: lower rank to reduce overfitting) ---
 lora:
@@ -45,10 +48,11 @@ lora:
 # --- Training (4B, 1x H100 80GB, small dataset) ---
 training:
   output_dir: "outputs/adapters"
-  num_train_epochs: 50
+  num_train_epochs: 30
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 4   # Effective batch size = 16
-  learning_rate: 1.0e-5
+  learning_rate: 5e-5
+  weight_decay: 0.01
   fp16: false
   bf16: true
   logging_steps: 5
