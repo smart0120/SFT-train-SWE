@@ -30,8 +30,25 @@ MODEL = None
 TOKENIZER = None
 
 
+def _content_to_text(content) -> str:
+    """Normalize message content to string. Gradio 6 uses list of blocks: [{\"type\": \"text\", \"text\": \"...\"}]."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, dict) and "text" in block:
+                parts.append(block["text"])
+        return " ".join(parts)
+    return str(content)
+
+
 def build_messages(system_prompt: str, history: list, user_message: str) -> list[dict]:
-    """Build messages list: system + history + new user message. History is either list of (user, assistant) pairs or Message-like with role/content."""
+    """Build messages list: system + history + new user message. Compatible with Gradio 5 (tuple pairs) and Gradio 6 (messages with role/content, content may be list of blocks)."""
     messages = []
     if (system_prompt or "").strip():
         messages.append({"role": "system", "content": system_prompt.strip()})
@@ -39,20 +56,24 @@ def build_messages(system_prompt: str, history: list, user_message: str) -> list
         if isinstance(item, (list, tuple)) and len(item) >= 2:
             u, a = item[0], item[1]
             if u:
-                messages.append({"role": "user", "content": u})
+                messages.append({"role": "user", "content": _content_to_text(u)})
             if a:
-                messages.append({"role": "assistant", "content": a})
+                messages.append({"role": "assistant", "content": _content_to_text(a)})
+        elif isinstance(item, dict) and "role" in item:
+            content = _content_to_text(item.get("content", ""))
+            if content:
+                messages.append({"role": item["role"], "content": content})
         elif hasattr(item, "role") and hasattr(item, "content"):
-            content = getattr(item, "content", "") or ""
+            content = _content_to_text(getattr(item, "content", ""))
             if content:
                 messages.append({"role": item.role, "content": content})
-    messages.append({"role": "user", "content": user_message})
+    messages.append({"role": "user", "content": _content_to_text(user_message)})
     return messages
 
 
 def chat_fn(
     message: str,
-    history: list[list],
+    history: list,
     system_prompt: str,
     max_new_tokens: int,
     temperature: float,
@@ -60,9 +81,10 @@ def chat_fn(
     """Generate assistant reply given message, history, and system prompt."""
     if MODEL is None or TOKENIZER is None:
         return "Load a model first (set path and click **Load model**)."
-    if not (message or "").strip():
+    user_msg = _content_to_text(message) if message is not None else ""
+    if not user_msg.strip():
         return "Please enter a message."
-    messages = build_messages(system_prompt or "", history, message.strip())
+    messages = build_messages(system_prompt or "", history, user_msg.strip())
     try:
         reply = generate_chat(
             MODEL,
