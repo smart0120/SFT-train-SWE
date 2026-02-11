@@ -67,11 +67,13 @@ def main(config_path: str | None = None):
     training_cfg["output_dir"] = str(run_adapter_dir)
 
     model_id = model_cfg["model_id"]
+    print(f"Base model: {model_id}")
     use_4bit = model_cfg.get("use_4bit_quantization", True)
     dtype_name = model_cfg.get("torch_dtype", "bfloat16")
     torch_dtype = torch.bfloat16 if dtype_name == "bfloat16" else torch.float16
 
     # Tokenizer
+    print(f"Loading tokenizer for {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, token=os.environ.get("HF_TOKEN"))
     tokenizer.pad_token = tokenizer.eos_token
     truncation_side = training_cfg.get("truncation_side", "right")
@@ -86,19 +88,21 @@ def main(config_path: str | None = None):
             bnb_4bit_compute_dtype=torch_dtype,
             bnb_4bit_use_double_quant=True,
         )
+        print(f"Loading model (4-bit) for {model_id}...")
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             quantization_config=bnb_config,
             device_map="auto",
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
         )
         model = prepare_model_for_kbit_training(model)
     else:
+        print(f"Loading model for {model_id}...")
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             device_map="auto",
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
         )
 
@@ -176,7 +180,7 @@ def main(config_path: str | None = None):
         model=model,
         args=training_args,
         train_dataset=dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         formatting_func=formatting_func,
         max_seq_length=training_cfg.get("max_seq_length", 1024),
         packing=training_cfg.get("packing", False),
