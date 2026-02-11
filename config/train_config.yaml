@@ -1,0 +1,67 @@
+# LoRA SFT Training Configuration
+# Override via environment variables or edit this file.
+
+# --- Paths (clear separation: adapters vs merged) ---
+paths:
+  adapter_output_dir: "outputs/adapters"
+  merged_output_dir: "outputs/merged"
+  # Dataset with ~300 examples (e.g. swe_synth 300-400)
+  dataset_path: "data/swe_synth_train.json"
+
+# --- Model (4B, 1x H100 80GB) ---
+model:
+  model_id: "Qwen/Qwen2.5-4B-Instruct"
+  # H100 80GB: full LoRA; set true for QLoRA if OOM
+  use_4bit_quantization: false
+  torch_dtype: "bfloat16"
+
+# --- Dataset ---
+dataset:
+  name: "your_dataset_name"
+  split: "train"
+  instruction_column: "instruction"
+  response_column: "response"
+  system_prompt: "You are a helpful assistant."
+  # Load system/instance templates from SWE-SYNTH config (agent section)
+  swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"
+  format_response_agent_style: true
+
+# --- LoRA (4B, small dataset: lower rank to reduce overfitting) ---
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# --- Training (4B, 1x H100 80GB, small dataset) ---
+training:
+  output_dir: "outputs/adapters"
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 4   # Effective batch size = 16
+  learning_rate: 2.0e-4
+  fp16: false
+  bf16: true
+  logging_steps: 5
+  save_strategy: "epoch"
+  save_total_limit: 3
+  optim: "adamw_torch"
+  max_seq_length: 4096   # Lower for H100 80GB; increase if no OOM
+  truncation_side: "right"
+  packing: false
+  report_to: "wandb"
+  # For loss vs epoch: in wandb add chart with x-axis "epoch", y-axis "train/loss_epoch"
+  wandb_project: "sft-lora"
+  wandb_entity: null
+
+# --- Run naming ---
+run_name: "qwen2.5-4b-lora-h100"

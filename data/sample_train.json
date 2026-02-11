@@ -1,0 +1,4 @@
+[
+  {"instruction": "What is the capital of France?", "response": "The capital of France is Paris."},
+  {"instruction": "Explain what a loop is in programming.", "response": "A loop is a control structure that repeats a block of code until a condition is met. Common types are for loops and while loops."}
+]

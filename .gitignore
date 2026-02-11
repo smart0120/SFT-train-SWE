@@ -1,0 +1,13 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+outputs/
+outputs/adapters/
+outputs/merged/
+*.egg-info/
+dist/
+build/
+.wandb/
+affinetes/

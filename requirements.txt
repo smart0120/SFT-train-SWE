@@ -1,0 +1,17 @@
+# LoRA SFT training
+torch>=2.0.0
+transformers>=4.36.0
+datasets>=2.14.0
+accelerate>=0.25.0
+peft>=0.7.0
+trl>=0.7.0
+bitsandbytes>=0.41.0
+
+# Config
+PyYAML>=6.0
+
+# Logging (optional)
+wandb>=0.16.0
+
+# SWE-SYNTH dataset generator (optional)
+httpx>=0.25.0
