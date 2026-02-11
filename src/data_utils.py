@@ -27,17 +27,19 @@ def format_instruction(
     """
     Format a single example into a chat prompt using the tokenizer's chat template.
 
-    - If example has "messages" (list of {role, content}), use that for multi-turn (system can be overridden).
-    - Else use instruction/response: user = instance_template with {{task}}=instruction, or plain instruction; assistant = response (optionally wrapped in THOUGHT + bash).
+    - If example has "messages" (list of {"role", "content", ...}): use for multi-turn. Only role and
+      content are used; extra fields (e.g. timestamp) are ignored. instance_id/task_id are ignored.
+    - Else use instruction/response: user = instance_template with {{task}}=instruction, or plain instruction;
+      assistant = response (optionally wrapped in THOUGHT + bash).
     """
     if "messages" in example and example["messages"]:
-        messages = list(example["messages"])
-        # Optionally override system from first system message
-        for i, m in enumerate(messages):
-            if m.get("role") == "system" and system_prompt:
-                messages[i] = {"role": "system", "content": system_prompt}
-                break
-        # If no system in list, prepend
+        # Normalize to only role + content (ignore timestamp and other extra fields)
+        raw = list(example["messages"])
+        messages = [
+            {"role": m.get("role", "user"), "content": m.get("content", "") or ""}
+            for m in raw
+        ]
+        # Keep system message from example (e.g. SWE-SYNTH template); only prepend if missing
         if messages[0].get("role") != "system" and system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
     else:

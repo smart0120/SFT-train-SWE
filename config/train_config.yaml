@@ -6,7 +6,7 @@ paths:
   adapter_output_dir: "outputs/adapters"
   merged_output_dir: "outputs/merged"
   # Dataset with ~300 examples (e.g. swe_synth 300-400)
-  dataset_path: "data/swe_synth_train.json"
+  dataset_path: "data/swe_dataset_messages.json"
 
 # --- Model (4B, 1x H100 80GB) ---
 model:
@@ -25,8 +25,10 @@ dataset:
   # Load system/instance templates from SWE-SYNTH config (agent section)
   swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"
   format_response_agent_style: true
-  # Pre-formatted "text" dataset (from scripts/prepare_swe_for_qwen.py): set to true and
-  # paths.dataset_path to the saved HF dataset dir (e.g. data/swe_qwen_dataset)
+  # use_text_column: true = use "text" column for training.
+  #   - If dataset has "text" column (HF dataset on disk): use as-is.
+  #   - If dataset has instance_id + messages (e.g. JSON from generate_swe_dataset.py): we build "text" from messages (chat template) at load time.
+  # use_text_column: false = use formatting_func (instruction/response or messages) applied per example.
   use_text_column: false
 
 # --- LoRA (4B, small dataset: lower rank to reduce overfitting) ---
@@ -72,4 +74,4 @@ training:
   wandb_entity: null
 
 # --- Run naming ---
-run_name: "qwen2.5-4b-lora-h100"
+run_name: "swe-lora-train"

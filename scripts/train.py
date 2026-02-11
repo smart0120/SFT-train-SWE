@@ -33,7 +33,7 @@ except ImportError:
 
 from src.config_loader import load_config
 from src.data_utils import load_and_prepare_dataset, format_instruction
-from datasets import load_from_disk
+from datasets import load_dataset, load_from_disk
 
 
 def _from_pretrained_causal_lm(model_id, **kwargs):
@@ -142,9 +142,37 @@ def main(config_path: str | None = None):
     use_text_column = dataset_cfg.get("use_text_column", False)
 
     if use_text_column:
-        # Pre-formatted dataset with "text" column (e.g. from scripts/prepare_swe_for_qwen.py)
-        print(f"Loading pre-formatted dataset from {dataset_path} (dataset_text_field='text')")
-        dataset = load_from_disk(dataset_path)
+        # Pre-formatted "text" column, or dataset with instance_id + messages (we build "text" from messages)
+        path_obj = Path(dataset_path)
+        if path_obj.is_dir():
+            print(f"Loading dataset from disk: {dataset_path}")
+            dataset = load_from_disk(dataset_path)
+        elif path_obj.suffix.lower() in (".json", ".jsonl"):
+            print(f"Loading dataset from JSON: {dataset_path}")
+            dataset = load_dataset("json", data_files=dataset_path, split="train")
+        else:
+            dataset = load_dataset(dataset_cfg.get("name", "json"), path=dataset_path, split=dataset_cfg.get("split", "train"))
+
+        if "text" not in dataset.column_names and "messages" in dataset.column_names:
+            # Build "text" from instance_id + messages via chat template
+            print("Dataset has instance_id/messages; building 'text' column from messages (chat template).")
+            system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
+            instance_template = dataset_cfg.get("instance_template")
+            format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+
+            def _messages_to_text(example):
+                return {"text": format_instruction(
+                    example,
+                    tokenizer,
+                    system_prompt=system_prompt,
+                    instance_template=instance_template,
+                    format_response_agent_style=format_response_agent_style,
+                )}
+
+            dataset = dataset.map(_messages_to_text, remove_columns=[], desc="Building text from messages")
+        else:
+            print(f"Using dataset with 'text' column (dataset_text_field='text')")
+
         eval_dataset = None
         validation_ratio = float(training_cfg.get("validation_ratio", 0))
         if validation_ratio > 0 and validation_ratio < 1:
@@ -154,6 +182,7 @@ def main(config_path: str | None = None):
             print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
         formatting_func = None
     else:
+        # Supports: (1) instruction/response JSON, (2) messages JSON (instance_id, task_id, messages with role/content)
         dataset = load_and_prepare_dataset(
             dataset_name=dataset_cfg["name"],
             split=dataset_cfg.get("split", "train"),

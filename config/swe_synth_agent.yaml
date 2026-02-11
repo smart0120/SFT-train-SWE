@@ -1,4 +1,4 @@
-# SWE-SYNTH agent templates (in-project copy for prepare_swe_for_qwen.py)
+# SWE-SYNTH agent templates (used by scripts/generate_swe_dataset.py)
 # Used for system/user message format. {{task}} in instance_template is replaced with
 # problem_statement + <current_code>...</current_code>.
 

@@ -4,11 +4,9 @@ Place your instruction-tuning dataset here or reference it in `config/train_conf
 
 ## Format
 
-Each example should have at least:
-- `instruction`: user prompt
-- `response`: assistant reply
+**Option A — instruction/response:** Each example has `instruction` (user prompt) and `response` (assistant reply). Optional: different column names via `dataset.instruction_column` and `dataset.response_column`.
 
-Optional: use different column names and set `dataset.instruction_column` and `dataset.response_column` in config.
+**Option B — multi-turn messages:** Each example has `messages`: a list of `{"role": "system"|"user"|"assistant", "content": "..."}`. The trainer applies the tokenizer chat template to each example; no need to set `use_text_column`. Use this for code-fixing style (issue + code + patch) from `scripts/generate_swe_dataset.py`.
 
 ## Options
 
@@ -59,14 +57,23 @@ paths:
 
 Set `dataset.swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"` and `dataset.format_response_agent_style: true` to use SWE-SYNTH system/instance templates and wrap the gold patch as THOUGHT + bash. Optionally use a different `dataset.system_prompt` for code-fixing.
 
-## SWE with code context (Qwen-style)
+## Combined: multi-turn messages JSON (code-fixing)
 
-To train with **issue + current code + patch** (repo clone, file content at base_commit), run:
+One script produces a **single JSON file** with multi-turn messages (closer to real code-fixing: system + user with issue/code + assistant patch). The trainer loads this JSON and uses `format_instruction` (chat template) on each example’s `messages` — keep `use_text_column: false`.
+
+Input for `--source file` must be JSON/JSONL of **full task dicts** (e.g. `source`, `bug`, `original`), not the simplified instruction/response JSON. Use R2 or local cache to get task files, or save task dicts from your pipeline.
 
 ```bash
-python scripts/prepare_swe_for_qwen.py tasks.jsonl ./data/swe_qwen_dataset
-# Uses config/swe_synth_agent.yaml (in-project) for format. Use --no_swe_synth_format for simple Issue/Patch format.
-# Or from R2: --source r2 --task-range 0-99
+# From a task file (code-context = clone repos, add file content to user message)
+python scripts/generate_swe_dataset.py path/to/tasks.json data/swe_dataset_messages.json --mode code-context --source file
+
+# Simple mode (no repo): issue + patch only
+python scripts/generate_swe_dataset.py path/to/tasks.json data/swe_dataset_messages.json --mode simple --source file
+
+# From R2 (code-context)
+python scripts/generate_swe_dataset.py --source r2 --task-range 0-99 data/swe_dataset_messages.json --mode code-context
 ```
 
-Then set `paths.dataset_path: "data/swe_qwen_dataset"` and `dataset.use_text_column: true`. Requires `gitpython` and `tqdm`; repos cached under `data/repo_cache`.
+Output format: each example is `{"instance_id": "...", "task_id": "..."|int, "messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}`.
+
+In `config/train_config.yaml`: set `paths.dataset_path: "data/swe_dataset_messages.json"` and leave `dataset.use_text_column: false`. Uses `config/swe_synth_agent.yaml` (or `--no-swe-synth-format` for simple Issue/Patch). Code-context mode requires `gitpython`; repos are cached under `data/repo_cache`.

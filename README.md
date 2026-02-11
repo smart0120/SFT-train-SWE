@@ -15,7 +15,7 @@ scripts/
   inference.py             # CLI inference
   webui.py                 # Chat UI (gradio)
   generate_swe_synth_dataset.py   # SWE-SYNTH → instruction/response JSON
-  prepare_swe_for_qwen.py   # SWE tasks + code context → HF dataset (text column)
+  generate_swe_dataset.py         # Multi-turn messages (code-fixing), simple or code-context → single JSON
 ```
 
 ## Setup
@@ -35,7 +35,8 @@ Edit `config/train_config.yaml`: `model.model_id`, `paths.dataset_path`, `run_na
 ## Data
 
 - **JSON (instruction/response):** e.g. `data/swe_synth_train.json`. Generate with `scripts/generate_swe_synth_dataset.py` (see `data/README.md`).
-- **Pre-formatted text (with code context):** `scripts/prepare_swe_for_qwen.py` → HF dataset; set `dataset.use_text_column: true` and `paths.dataset_path` to that dataset dir.
+- **JSON (multi-turn messages, code-fixing):** One script for both simple and code-context: `python scripts/generate_swe_dataset.py [input] [output] --mode code-context --source file`. Writes a single JSON file: each example has `instance_id`, `task_id`, and `messages` (list of `{"role", "content"}`). Point `paths.dataset_path` at this file; keep `use_text_column: false` — the trainer uses `format_instruction` and applies the chat template from each example’s `messages`.
+- **Pre-formatted / text column (`use_text_column: true`):** Set `dataset.use_text_column: true` and `paths.dataset_path` to either (1) an HF dataset dir with a `text` column, or (2) a JSON file with `instance_id` and `messages` — the trainer will build the `text` column from `messages` (chat template) at load time.
 
 Details and formats: `data/README.md`.
 
