@@ -2,6 +2,28 @@
 from datasets import load_dataset, Dataset
 
 
+def messages_to_text(example: dict, tokenizer) -> str:
+    """
+    Convert a single example with a "messages" field to training text using only
+    the tokenizer's chat template. No system prompt override, no re-formatting.
+    Use this for pre-formatted multi-turn datasets (e.g. SWE with system/user/assistant
+    already defined in the data).
+    """
+    messages = list(example.get("messages") or [])
+    if not messages:
+        return ""
+    # Normalize to only role + content (ignore timestamp etc.)
+    normalized = [
+        {"role": m.get("role", "user"), "content": (m.get("content") or "") or ""}
+        for m in messages
+    ]
+    return tokenizer.apply_chat_template(
+        normalized,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+
+
 def _format_response_agent_style(response: str) -> str:
     """Wrap a raw response (e.g. gold patch) as THOUGHT + single bash block (SWE-SYNTH agent style)."""
     if not response or not response.strip():
@@ -33,14 +55,15 @@ def format_instruction(
       assistant = response (optionally wrapped in THOUGHT + bash).
     """
     if "messages" in example and example["messages"]:
-        # Normalize to only role + content (ignore timestamp and other extra fields)
+        # Use messages as-is: only normalize role/content and apply chat template.
+        # Do not override or prepend system prompt (dataset already has correct system/user/assistant).
         raw = list(example["messages"])
         messages = [
-            {"role": m.get("role", "user"), "content": m.get("content", "") or ""}
+            {"role": m.get("role", "user"), "content": (m.get("content") or "") or ""}
             for m in raw
         ]
-        # Keep system message from example (e.g. SWE-SYNTH template); only prepend if missing
-        if messages[0].get("role") != "system" and system_prompt:
+        # Only prepend system if there is no system message at all (e.g. legacy data)
+        if messages and messages[0].get("role") != "system" and system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
     else:
         instruction = example.get("instruction", "")

@@ -32,7 +32,7 @@ except ImportError:
     SFTConfig = None
 
 from src.config_loader import load_config
-from src.data_utils import load_and_prepare_dataset, format_instruction
+from src.data_utils import load_and_prepare_dataset, format_instruction, messages_to_text
 from datasets import load_dataset, load_from_disk
 
 
@@ -154,22 +154,13 @@ def main(config_path: str | None = None):
             dataset = load_dataset(dataset_cfg.get("name", "json"), path=dataset_path, split=dataset_cfg.get("split", "train"))
 
         if "text" not in dataset.column_names and "messages" in dataset.column_names:
-            # Build "text" from instance_id + messages via chat template
-            print("Dataset has instance_id/messages; building 'text' column from messages (chat template).")
-            system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
-            instance_template = dataset_cfg.get("instance_template")
-            format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+            # Pre-formatted multi-turn: use messages as-is, only apply chat template (no re-formatting)
+            print("Dataset has 'messages'; building 'text' from messages (chat template only, no override).")
 
-            def _messages_to_text(example):
-                return {"text": format_instruction(
-                    example,
-                    tokenizer,
-                    system_prompt=system_prompt,
-                    instance_template=instance_template,
-                    format_response_agent_style=format_response_agent_style,
-                )}
+            def _map_messages_to_text(example):
+                return {"text": messages_to_text(example, tokenizer)}
 
-            dataset = dataset.map(_messages_to_text, remove_columns=[], desc="Building text from messages")
+            dataset = dataset.map(_map_messages_to_text, remove_columns=[], desc="Building text from messages")
         else:
             print(f"Using dataset with 'text' column (dataset_text_field='text')")
 
@@ -182,7 +173,7 @@ def main(config_path: str | None = None):
             print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
         formatting_func = None
     else:
-        # Supports: (1) instruction/response JSON, (2) messages JSON (instance_id, task_id, messages with role/content)
+        # Supports: (1) instruction/response JSON, (2) pre-formatted messages (multi-turn; no re-formatting)
         dataset = load_and_prepare_dataset(
             dataset_name=dataset_cfg["name"],
             split=dataset_cfg.get("split", "train"),
@@ -201,18 +192,24 @@ def main(config_path: str | None = None):
             eval_dataset = None
             if validation_ratio != 0:
                 print("validation_ratio must be in (0, 1); skipping validation.")
-        system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
-        instance_template = dataset_cfg.get("instance_template")
-        format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
 
-        def formatting_func(example):
-            return format_instruction(
-                example,
-                tokenizer,
-                system_prompt=system_prompt,
-                instance_template=instance_template,
-                format_response_agent_style=format_response_agent_style,
-            )
+        if "messages" in dataset.column_names:
+            # Pre-formatted multi-turn: use messages as-is, only apply chat template (no override)
+            print("Using pre-formatted 'messages' (chat template only, no system/user/assistant override).")
+            formatting_func = lambda ex: messages_to_text(ex, tokenizer)
+        else:
+            system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
+            instance_template = dataset_cfg.get("instance_template")
+            format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+
+            def formatting_func(example):
+                return format_instruction(
+                    example,
+                    tokenizer,
+                    system_prompt=system_prompt,
+                    instance_template=instance_template,
+                    format_response_agent_style=format_response_agent_style,
+                )
 
     # Wandb: set env from config so report_to="wandb" uses correct project/entity
     wandb_project = training_cfg.get("wandb_project")
@@ -253,6 +250,8 @@ def main(config_path: str | None = None):
             **_common_args,
             max_length=training_cfg.get("max_seq_length", 1024),
             packing=training_cfg.get("packing", False),
+            # Train on assistant messages only (loss only on assistant tokens); for conversational/messages datasets
+            assistant_only_loss=dataset_cfg.get("assistant_only_loss", True),
         )
     else:
         sft_config = TrainingArguments(**_common_args)
