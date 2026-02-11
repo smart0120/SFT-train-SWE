@@ -86,6 +86,37 @@ def generate(
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
+def generate_chat(
+    model,
+    tokenizer,
+    messages: list[dict],
+    max_new_tokens: int = 512,
+    do_sample: bool = True,
+    temperature: float = 0.7,
+) -> str:
+    """
+    Generate assistant reply given a list of messages (e.g. [{"role":"system","content":"..."}, {"role":"user","content":"..."}, ...]).
+    Returns only the new assistant reply text (no prompt included).
+    """
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        return_tensors="pt",
+        add_generation_prompt=True,
+    ).to(model.device)
+    outputs = model.generate(
+        inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        temperature=temperature,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+    # Decode only the new tokens (assistant reply)
+    new_tokens = outputs[0][inputs.shape[1] :]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
 def main():
     import argparse
     p = argparse.ArgumentParser()

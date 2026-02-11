@@ -15,3 +15,6 @@ wandb>=0.16.0
 
 # SWE-SYNTH dataset generator (optional)
 httpx>=0.25.0
+
+# Web UI for chat (optional)
+gradio>=4.0.0
