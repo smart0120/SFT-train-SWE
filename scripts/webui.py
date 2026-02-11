@@ -98,7 +98,7 @@ def load_model_fn(model_path: str) -> str:
 
 def main():
     default_path = str(ROOT / "outputs" / "merged")
-    with gr.Blocks(title="SFT LoRA Chat", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown("## Chat with merged model")
         with gr.Row():
             model_path = gr.Textbox(
@@ -123,7 +123,6 @@ def main():
         chat = gr.ChatInterface(
             fn=chat_fn,
             additional_inputs=[system_prompt, max_new_tokens, temperature],
-            label="Chat",
         )
 
         load_btn.click(
@@ -132,7 +131,7 @@ def main():
             outputs=[load_status],
         )
 
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, title="SFT LoRA Chat", theme=gr.themes.Soft())
 
 
 if __name__ == "__main__":
