@@ -22,12 +22,28 @@ if _env_file.exists():
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments, TrainerCallback
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainerCallback, TrainingArguments
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from trl import SFTTrainer
 
+try:
+    from trl import SFTConfig
+except ImportError:
+    SFTConfig = None
+
 from src.config_loader import load_config
 from src.data_utils import load_and_prepare_dataset, format_instruction
+
+
+def _from_pretrained_causal_lm(model_id, **kwargs):
+    """Load causal LM; use dtype (new) or torch_dtype (legacy) per transformers API."""
+    torch_dtype = kwargs.pop("torch_dtype", None)
+    if torch_dtype is not None:
+        try:
+            return AutoModelForCausalLM.from_pretrained(model_id, dtype=torch_dtype, **kwargs)
+        except TypeError:
+            return AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype, **kwargs)
+    return AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
 
 
 class WandbEpochLossCallback(TrainerCallback):
@@ -89,20 +105,20 @@ def main(config_path: str | None = None):
             bnb_4bit_use_double_quant=True,
         )
         print(f"Loading model (4-bit) for {model_id}...")
-        model = AutoModelForCausalLM.from_pretrained(
+        model = _from_pretrained_causal_lm(
             model_id,
             quantization_config=bnb_config,
             device_map="auto",
-            dtype=torch_dtype,
+            torch_dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
         )
         model = prepare_model_for_kbit_training(model)
     else:
         print(f"Loading model for {model_id}...")
-        model = AutoModelForCausalLM.from_pretrained(
+        model = _from_pretrained_causal_lm(
             model_id,
             device_map="auto",
-            dtype=torch_dtype,
+            torch_dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
         )
 
@@ -155,7 +171,7 @@ def main(config_path: str | None = None):
     if report_to == "wandb" and os.environ.get("WANDB_API_KEY") in (None, "", "disabled"):
         report_to = "none"
 
-    training_args = TrainingArguments(
+    _common_args = dict(
         output_dir=training_cfg["output_dir"],
         num_train_epochs=training_cfg.get("num_train_epochs", 3),
         per_device_train_batch_size=training_cfg.get("per_device_train_batch_size", 2),
@@ -171,6 +187,14 @@ def main(config_path: str | None = None):
         report_to=report_to,
         run_name=run_name,
     )
+    if SFTConfig is not None:
+        sft_config = SFTConfig(
+            **_common_args,
+            max_length=training_cfg.get("max_seq_length", 1024),
+            packing=training_cfg.get("packing", False),
+        )
+    else:
+        sft_config = TrainingArguments(**_common_args)
 
     callbacks = []
     if report_to == "wandb":
@@ -178,12 +202,10 @@ def main(config_path: str | None = None):
 
     trainer = SFTTrainer(
         model=model,
-        args=training_args,
+        args=sft_config,
         train_dataset=dataset,
         processing_class=tokenizer,
         formatting_func=formatting_func,
-        max_seq_length=training_cfg.get("max_seq_length", 1024),
-        packing=training_cfg.get("packing", False),
         callbacks=callbacks,
     )
 
