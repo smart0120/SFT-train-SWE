@@ -73,6 +73,10 @@ def _to_input_tensor(inputs, tokenizer, device):
     """Normalize apply_chat_template result to a tensor on device (some tokenizers return str or list of token strs)."""
     if isinstance(inputs, torch.Tensor):
         return inputs.to(device)
+    if isinstance(inputs, dict) and "input_ids" in inputs:
+        return _to_input_tensor(inputs["input_ids"], tokenizer, device)
+    if hasattr(inputs, "input_ids"):
+        return _to_input_tensor(inputs.input_ids, tokenizer, device)
     if isinstance(inputs, str):
         out = tokenizer(inputs, return_tensors="pt")
         return out["input_ids"].to(device)
@@ -93,7 +97,12 @@ def _to_input_tensor(inputs, tokenizer, device):
             if t.dim() == 1:
                 t = t.unsqueeze(0)
             return t.to(device)
-    return torch.tensor(inputs, dtype=torch.long).to(device)
+    try:
+        return torch.tensor(inputs, dtype=torch.long).to(device)
+    except (TypeError, ValueError):
+        # Last-resort fallback for unknown template output types.
+        out = tokenizer(str(inputs), return_tensors="pt")
+        return out["input_ids"].to(device)
 
 
 def generate(
