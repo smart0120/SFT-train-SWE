@@ -69,6 +69,16 @@ def _inference_device(model):
     return next(model.parameters()).device
 
 
+def _to_input_tensor(inputs, tokenizer, device):
+    """Normalize apply_chat_template result to a tensor on device (some tokenizers return str)."""
+    if isinstance(inputs, torch.Tensor):
+        return inputs.to(device)
+    if isinstance(inputs, str):
+        out = tokenizer(inputs, return_tensors="pt")
+        return out["input_ids"].to(device)
+    return torch.tensor(inputs, dtype=torch.long).to(device)
+
+
 def generate(
     model,
     tokenizer,
@@ -86,9 +96,7 @@ def generate(
         return_tensors="pt",
         add_generation_prompt=True,
     )
-    if not isinstance(inputs, torch.Tensor):
-        inputs = torch.tensor(inputs, dtype=torch.long)
-    inputs = inputs.to(device)
+    inputs = _to_input_tensor(inputs, tokenizer, device)
     with torch.inference_mode():
         outputs = model.generate(
             inputs,
@@ -120,9 +128,7 @@ def generate_chat(
         return_tensors="pt",
         add_generation_prompt=True,
     )
-    if not isinstance(inputs, torch.Tensor):
-        inputs = torch.tensor(inputs, dtype=torch.long)
-    inputs = inputs.to(device)
+    inputs = _to_input_tensor(inputs, tokenizer, device)
     with torch.inference_mode():
         outputs = model.generate(
             inputs,
@@ -132,7 +138,8 @@ def generate_chat(
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
     # Decode only the new tokens (assistant reply)
-    new_tokens = outputs[0][inputs.shape[1] :]
+    input_length = inputs.shape[1] if inputs.dim() > 1 else inputs.shape[0]
+    new_tokens = outputs[0][input_length:]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
