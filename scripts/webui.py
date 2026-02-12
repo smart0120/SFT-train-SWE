@@ -137,8 +137,8 @@ def main():
 
         system_prompt = gr.Textbox(
             label="System prompt",
-            placeholder="You are a helpful assistant.",
-            value="You are a helpful assistant.",
+            placeholder="Optional. Leave empty to use no system prompt.",
+            value="",
             lines=3,
         )
         with gr.Accordion("Generation options", open=False):

@@ -70,12 +70,29 @@ def _inference_device(model):
 
 
 def _to_input_tensor(inputs, tokenizer, device):
-    """Normalize apply_chat_template result to a tensor on device (some tokenizers return str)."""
+    """Normalize apply_chat_template result to a tensor on device (some tokenizers return str or list of token strs)."""
     if isinstance(inputs, torch.Tensor):
         return inputs.to(device)
     if isinstance(inputs, str):
         out = tokenizer(inputs, return_tensors="pt")
         return out["input_ids"].to(device)
+    if isinstance(inputs, (list, tuple)) and inputs:
+        if isinstance(inputs[0], str):
+            # List of token strings (e.g. from some chat templates)
+            ids = tokenizer.convert_tokens_to_ids(inputs)
+            t = torch.tensor(ids, dtype=torch.long)
+            if t.dim() == 1:
+                t = t.unsqueeze(0)
+            return t.to(device)
+        # List of ints (token ids) – try tensor; if any element is str, convert tokens to ids
+        try:
+            return torch.tensor(inputs, dtype=torch.long).to(device)
+        except (TypeError, ValueError):
+            ids = tokenizer.convert_tokens_to_ids(inputs)
+            t = torch.tensor(ids, dtype=torch.long)
+            if t.dim() == 1:
+                t = t.unsqueeze(0)
+            return t.to(device)
     return torch.tensor(inputs, dtype=torch.long).to(device)
 
 
