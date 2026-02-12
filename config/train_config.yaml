@@ -1,30 +1,30 @@
 # LoRA SFT Training Configuration
-# Override via environment variables or edit this file.
+# 66k examples (mini-SWE-agent-plus), 1x H100 80GB, 4B model.
 
-# --- Paths (clear separation: adapters vs merged) ---
+# --- Paths ---
 paths:
   adapter_output_dir: "outputs/adapters"
   merged_output_dir: "outputs/merged"
-  # Dataset with ~300 examples (e.g. swe_synth 300-400)
-  dataset_path: "data/swe_dataset_messages.json"
+  # Unused when dataset.dataset_hf_id is set
+  dataset_path: null
 
 # --- Model (4B, 1x H100 80GB) ---
 model:
   model_id: "Qwen/Qwen2.5-4B-Instruct"
-  # H100 80GB: full LoRA; set true for QLoRA if OOM
   use_4bit_quantization: false
   torch_dtype: "bfloat16"
 
-# --- Dataset (always messages: list of {role, content}; text built via chat template) ---
+# --- Dataset (66k mini-SWE-agent-plus from HuggingFace) ---
 dataset:
   name: "json"
   split: "train"
+  dataset_hf_id: "Kwai-Klear/SWE-smith-mini_swe_agent_plus-trajectories-66k"
   assistant_only_loss: true
 
-# --- LoRA (4B, small dataset: lower rank to reduce overfitting) ---
+# --- LoRA (4B) ---
 lora:
-  r: 8
-  lora_alpha: 16
+  r: 16
+  lora_alpha: 32
   lora_dropout: 0.05
   bias: "none"
   task_type: "CAUSAL_LM"
@@ -37,31 +37,31 @@ lora:
     - "up_proj"
     - "down_proj"
 
-# --- Training (4B, 1x H100 80GB, small dataset) ---
+# --- Training (66k, 1x H100, 4B) ---
 training:
   output_dir: "outputs/adapters"
-  num_train_epochs: 50
+  num_train_epochs: 3
   per_device_train_batch_size: 4
-  gradient_accumulation_steps: 2   # Effective batch size = 16
-  learning_rate: 1e-5
-  weight_decay: 0.001
+  gradient_accumulation_steps: 4   # effective batch size = 16
+  learning_rate: 2e-5
+  weight_decay: 0.01
   fp16: false
   bf16: true
-  logging_steps: 5
+  logging_steps: 10
   save_strategy: "epoch"
   save_total_limit: 3
   optim: "adamw_torch"
-  max_seq_length: 4096   # Lower for H100 80GB; increase if no OOM
+  max_seq_length: 8192
   truncation_side: "left"
-  packing: false
+  packing: true
+  warmup_ratio: 0.03
   report_to: "wandb"
-  # Validation: split train data by ratio and run eval every eval_steps
-  validation_ratio: 0.1   # 0 = no validation; e.g. 0.1 = 10% for eval
-  eval_strategy: "steps"  # "steps" or "epoch" or "no"
-  eval_steps: 5         # run validation every N steps (if eval_strategy: "steps")
-  # For loss vs epoch: in wandb add chart with x-axis "epoch", y-axis "train/loss_epoch"
+  validation_ratio: 0.05
+  eval_strategy: "steps"
+  eval_steps: 500
+  seed: 42
   wandb_project: "sft-lora"
   wandb_entity: null
 
 # --- Run naming ---
-run_name: "swe-lora-train"
+run_name: "mini-swe-66k-4b-lora"

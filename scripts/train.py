@@ -32,7 +32,7 @@ except ImportError:
     SFTConfig = None
 
 from src.config_loader import load_config
-from src.data_utils import messages_to_text
+from src.data_utils import format_chat
 from datasets import load_dataset, load_from_disk
 
 
@@ -91,7 +91,9 @@ def main(config_path: str | None = None):
 
     # Tokenizer
     print(f"Loading tokenizer for {model_id}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_id, token=os.environ.get("HF_TOKEN"))
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id, token=os.environ.get("HF_TOKEN"), trust_remote_code=True
+    )
     tokenizer.pad_token = tokenizer.eos_token
     truncation_side = training_cfg.get("truncation_side", "right")
     if hasattr(tokenizer, "truncation_side"):
@@ -112,6 +114,7 @@ def main(config_path: str | None = None):
             device_map="auto",
             torch_dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
+            trust_remote_code=True,
         )
         model = prepare_model_for_kbit_training(model)
     else:
@@ -121,6 +124,7 @@ def main(config_path: str | None = None):
             device_map="auto",
             torch_dtype=torch_dtype,
             token=os.environ.get("HF_TOKEN"),
+            trust_remote_code=True,
         )
 
     # LoRA
@@ -135,28 +139,36 @@ def main(config_path: str | None = None):
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Dataset: always messages (JSON or disk); build "text" from messages via chat template
-    dataset_path = paths.get("dataset_path") or dataset_cfg.get("dataset_path")
-    if dataset_path and not Path(dataset_path).is_absolute():
-        dataset_path = str(ROOT / dataset_path)
-    path_obj = Path(dataset_path)
-    if path_obj.is_dir():
-        print(f"Loading dataset from disk: {dataset_path}")
-        dataset = load_from_disk(dataset_path)
-    elif path_obj.suffix.lower() in (".json", ".jsonl"):
-        print(f"Loading dataset from JSON: {dataset_path}")
-        dataset = load_dataset("json", data_files=dataset_path, split="train")
+    # Dataset: always messages. Load from HuggingFace Hub by id, or from local path (dir / JSON).
+    split = dataset_cfg.get("split", "train")
+    dataset_hf_id = dataset_cfg.get("dataset_hf_id") or paths.get("dataset_hf_id")
+    if dataset_hf_id:
+        print(f"Loading dataset from HuggingFace: {dataset_hf_id}")
+        dataset = load_dataset(dataset_hf_id, split=split, token=os.environ.get("HF_TOKEN"))
     else:
-        dataset = load_dataset(
-            dataset_cfg.get("name", "json"),
-            path=dataset_path,
-            split=dataset_cfg.get("split", "train"),
-        )
+        dataset_path = paths.get("dataset_path") or dataset_cfg.get("dataset_path")
+        if not dataset_path:
+            raise ValueError("Set dataset.dataset_hf_id (e.g. Kwai-Klear/...-66k) or paths.dataset_path (local JSON/dir)")
+        if not Path(dataset_path).is_absolute():
+            dataset_path = str(ROOT / dataset_path)
+        path_obj = Path(dataset_path)
+        if path_obj.is_dir():
+            print(f"Loading dataset from disk: {dataset_path}")
+            dataset = load_from_disk(dataset_path)
+        elif path_obj.suffix.lower() in (".json", ".jsonl"):
+            print(f"Loading dataset from JSON: {dataset_path}")
+            dataset = load_dataset("json", data_files=dataset_path, split="train")
+        else:
+            dataset = load_dataset(
+                dataset_cfg.get("name", "json"),
+                path=dataset_path,
+                split=split,
+            )
 
-    def _map_messages_to_text(example):
-        return {"text": messages_to_text(example, tokenizer)}
+    def _format_chat(example):
+        return format_chat(example, tokenizer)
 
-    dataset = dataset.map(_map_messages_to_text, remove_columns=[], desc="Building text from messages")
+    dataset = dataset.map(_format_chat, remove_columns=[], desc="Format chat (messages → text)")
 
     eval_dataset = None
     validation_ratio = float(training_cfg.get("validation_ratio", 0))
@@ -205,6 +217,8 @@ def main(config_path: str | None = None):
             **_common_args,
             max_length=training_cfg.get("max_seq_length", 1024),
             packing=training_cfg.get("packing", False),
+            dataset_text_field="text",
+            remove_unused_columns=False,
             # Train on assistant messages only (loss only on assistant tokens); for conversational/messages datasets
             assistant_only_loss=dataset_cfg.get("assistant_only_loss", True),
         )
@@ -224,6 +238,8 @@ def main(config_path: str | None = None):
         callbacks=callbacks,
     )
     trainer_kw["dataset_text_field"] = "text"
+    if SFTConfig is not None:
+        trainer_kw.pop("dataset_text_field", None)  # already in sft_config
     trainer = SFTTrainer(**trainer_kw)
 
     trainer.train()

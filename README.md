@@ -34,9 +34,18 @@ Edit `config/train_config.yaml`: `model.model_id`, `paths.dataset_path`, `run_na
 
 ## Data
 
-Datasets are **messages-only**: each example has `messages` (list of `{"role": "system"|"user"|"assistant", "content": "..."}`). Set `paths.dataset_path` to a JSON file (or HF dataset dir). The trainer builds training text from each example’s `messages` using the tokenizer chat template.
+Datasets are **messages-only**: each example has `messages` (list of `{"role": "system"|"user"|"assistant", "content": "..."}`). The trainer builds text from `messages` with the tokenizer chat template.
 
-To generate SWE code-fixing data: `python scripts/generate_swe_dataset.py [input] [output] --mode code-context --source file`. See `data/README.md`.
+- **Local:** Set `paths.dataset_path` to a JSON file or a dataset dir (e.g. `data/swe_dataset_messages.json`).
+- **HuggingFace:** Set `dataset.dataset_hf_id` to a dataset id; e.g. for [mini-SWE-agent-plus](https://mini-swe-agent.com/) 66k trajectories:
+  ```yaml
+  dataset:
+    dataset_hf_id: "Kwai-Klear/SWE-smith-mini_swe_agent_plus-trajectories-66k"
+    split: "train"
+  ```
+  Leave `paths.dataset_path` unset or comment it out. For 66k examples consider fewer epochs or a smaller subset.
+
+To generate your own SWE code-fixing data: `python scripts/generate_swe_dataset.py [input] [output] --mode code-context --source file`. See `data/README.md`.
 
 ## Commands
 

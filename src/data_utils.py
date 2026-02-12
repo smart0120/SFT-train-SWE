@@ -1,21 +1,26 @@
 """Dataset formatting for messages-based SFT (role/content only, chat template)."""
-# No dataset loading here; train.py loads JSON and expects "messages" column.
+# SFTTrainer expects a "text" column (one string per example). We build it from
+# "messages" via the tokenizer's chat template so the model sees the same format
+# it was pretrained on. TRL does not accept raw "messages" without this step.
 
 
-def messages_to_text(example: dict, tokenizer) -> str:
+def format_chat(example: dict, tokenizer) -> dict:
     """
-    Convert a single example with a "messages" field to training text using only
-    the tokenizer's chat template. Only role and content are used.
+    In-place: set example["text"] from example["messages"] using the tokenizer
+    chat template (tokenize=False; trainer tokenizes later). Training = full
+    completion, so add_generation_prompt=False. Returns example for dataset.map.
     """
     messages = list(example.get("messages") or [])
     if not messages:
-        return ""
+        example["text"] = ""
+        return example
     normalized = [
         {"role": m.get("role", "user"), "content": (m.get("content") or "") or ""}
         for m in messages
     ]
-    return tokenizer.apply_chat_template(
+    example["text"] = tokenizer.apply_chat_template(
         normalized,
         tokenize=False,
         add_generation_prompt=False,
     )
+    return example
