@@ -4,9 +4,7 @@ Place your instruction-tuning dataset here or reference it in `config/train_conf
 
 ## Format
 
-**Option A — instruction/response:** Each example has `instruction` (user prompt) and `response` (assistant reply). Optional: different column names via `dataset.instruction_column` and `dataset.response_column`.
-
-**Option B — multi-turn messages:** Each example has `messages`: a list of `{"role": "system"|"user"|"assistant", "content": "..."}`. The trainer applies the tokenizer chat template to each example; no need to set `use_text_column`. Use this for code-fixing style (issue + code + patch) from `scripts/generate_swe_dataset.py`.
+Each example must have **messages**: a list of `{"role": "system"|"user"|"assistant", "content": "..."}`. The trainer builds text from `messages` with the tokenizer chat template only (no extra formatting).
 
 ## Options
 
@@ -55,13 +53,11 @@ paths:
   dataset_path: "data/swe_synth_train.json"
 ```
 
-Set `dataset.swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"` and `dataset.format_response_agent_style: true` to use SWE-SYNTH system/instance templates and wrap the gold patch as THOUGHT + bash. Optionally use a different `dataset.system_prompt` for code-fixing.
+## Multi-turn messages JSON (code-fixing)
 
-## Combined: multi-turn messages JSON (code-fixing)
+One script produces a **single JSON file** with multi-turn messages. The trainer expects `messages` only; set `paths.dataset_path: "data/swe_dataset_messages.json"`.
 
-One script produces a **single JSON file** with multi-turn messages (closer to real code-fixing: system + user with issue/code + assistant patch). The trainer loads this JSON and uses `format_instruction` (chat template) on each example’s `messages` — keep `use_text_column: false`.
-
-Input for `--source file` must be JSON/JSONL of **full task dicts** (e.g. `source`, `bug`, `original`), not the simplified instruction/response JSON. Use R2 or local cache to get task files, or save task dicts from your pipeline.
+Input for `--source file` must be JSON/JSONL of **full task dicts** (e.g. `source`, `bug`, `original`). Use R2 or local cache to get task files, or save task dicts from your pipeline.
 
 ```bash
 # From a task file (code-context = clone repos, add file content to user message)
@@ -74,6 +70,4 @@ python scripts/generate_swe_dataset.py path/to/tasks.json data/swe_dataset_messa
 python scripts/generate_swe_dataset.py --source r2 --task-range 0-99 data/swe_dataset_messages.json --mode code-context
 ```
 
-Output format: each example is `{"instance_id": "...", "task_id": "..."|int, "messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}`.
-
-In `config/train_config.yaml`: set `paths.dataset_path: "data/swe_dataset_messages.json"` and leave `dataset.use_text_column: false`. Uses `config/swe_synth_agent.yaml` (or `--no-swe-synth-format` for simple Issue/Patch). Code-context mode requires `gitpython`; repos are cached under `data/repo_cache`.
+Output: each example is `{"instance_id": "...", "task_id": ... , "messages": [{"role": "system"|"user"|"assistant", "content": "..."}, ...]}`. Code-context mode uses `config/swe_synth_agent.yaml` (or `--no-swe-synth-format` for simple); repos are cached under `data/repo_cache`.

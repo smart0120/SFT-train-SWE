@@ -34,11 +34,9 @@ Edit `config/train_config.yaml`: `model.model_id`, `paths.dataset_path`, `run_na
 
 ## Data
 
-- **JSON (instruction/response):** e.g. `data/swe_synth_train.json`. Generate with `scripts/generate_swe_synth_dataset.py` (see `data/README.md`).
-- **JSON (multi-turn messages, code-fixing):** One script for both simple and code-context: `python scripts/generate_swe_dataset.py [input] [output] --mode code-context --source file`. Writes a single JSON file: each example has `instance_id`, `task_id`, and `messages` (list of `{"role", "content"}`). Point `paths.dataset_path` at this file; keep `use_text_column: false` — the trainer uses `format_instruction` and applies the chat template from each example’s `messages`.
-- **Pre-formatted / text column (`use_text_column: true`):** Set `dataset.use_text_column: true` and `paths.dataset_path` to either (1) an HF dataset dir with a `text` column, or (2) a JSON file with `instance_id` and `messages` — the trainer will build the `text` column from `messages` (chat template) at load time.
+Datasets are **messages-only**: each example has `messages` (list of `{"role": "system"|"user"|"assistant", "content": "..."}`). Set `paths.dataset_path` to a JSON file (or HF dataset dir). The trainer builds training text from each example’s `messages` using the tokenizer chat template.
 
-Details and formats: `data/README.md`.
+To generate SWE code-fixing data: `python scripts/generate_swe_dataset.py [input] [output] --mode code-context --source file`. See `data/README.md`.
 
 ## Commands
 

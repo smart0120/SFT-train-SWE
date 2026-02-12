@@ -19,21 +19,6 @@ def load_config(config_path: str | Path | None = None) -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Load SWE-SYNTH templates if path set
-    root = config_path.parent.parent
-    dataset_cfg = config.get("dataset", {})
-    swe_path = dataset_cfg.get("swe_synth_config_path")
-    if swe_path:
-        full_path = (root / swe_path).resolve()
-        if full_path.exists():
-            with open(full_path, "r", encoding="utf-8") as f:
-                swe = yaml.safe_load(f)
-            agent = swe.get("agent", {})
-            if agent.get("system_template"):
-                dataset_cfg["system_prompt"] = agent["system_template"]
-            if agent.get("instance_template"):
-                dataset_cfg["instance_template"] = agent["instance_template"]
-
     # Env overrides
     if _env("MODEL_ID"):
         config["model"]["model_id"] = _env("MODEL_ID")

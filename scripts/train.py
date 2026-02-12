@@ -32,7 +32,7 @@ except ImportError:
     SFTConfig = None
 
 from src.config_loader import load_config
-from src.data_utils import load_and_prepare_dataset, format_instruction, messages_to_text
+from src.data_utils import messages_to_text
 from datasets import load_dataset, load_from_disk
 
 
@@ -135,81 +135,36 @@ def main(config_path: str | None = None):
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # Dataset
+    # Dataset: always messages (JSON or disk); build "text" from messages via chat template
     dataset_path = paths.get("dataset_path") or dataset_cfg.get("dataset_path")
     if dataset_path and not Path(dataset_path).is_absolute():
         dataset_path = str(ROOT / dataset_path)
-    use_text_column = dataset_cfg.get("use_text_column", False)
-
-    if use_text_column:
-        # Pre-formatted "text" column, or dataset with instance_id + messages (we build "text" from messages)
-        path_obj = Path(dataset_path)
-        if path_obj.is_dir():
-            print(f"Loading dataset from disk: {dataset_path}")
-            dataset = load_from_disk(dataset_path)
-        elif path_obj.suffix.lower() in (".json", ".jsonl"):
-            print(f"Loading dataset from JSON: {dataset_path}")
-            dataset = load_dataset("json", data_files=dataset_path, split="train")
-        else:
-            dataset = load_dataset(dataset_cfg.get("name", "json"), path=dataset_path, split=dataset_cfg.get("split", "train"))
-
-        if "text" not in dataset.column_names and "messages" in dataset.column_names:
-            # Pre-formatted multi-turn: use messages as-is, only apply chat template (no re-formatting)
-            print("Dataset has 'messages'; building 'text' from messages (chat template only, no override).")
-
-            def _map_messages_to_text(example):
-                return {"text": messages_to_text(example, tokenizer)}
-
-            dataset = dataset.map(_map_messages_to_text, remove_columns=[], desc="Building text from messages")
-        else:
-            print(f"Using dataset with 'text' column (dataset_text_field='text')")
-
-        eval_dataset = None
-        validation_ratio = float(training_cfg.get("validation_ratio", 0))
-        if validation_ratio > 0 and validation_ratio < 1:
-            split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
-            dataset = split["train"]
-            eval_dataset = split["test"]
-            print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
-        formatting_func = None
+    path_obj = Path(dataset_path)
+    if path_obj.is_dir():
+        print(f"Loading dataset from disk: {dataset_path}")
+        dataset = load_from_disk(dataset_path)
+    elif path_obj.suffix.lower() in (".json", ".jsonl"):
+        print(f"Loading dataset from JSON: {dataset_path}")
+        dataset = load_dataset("json", data_files=dataset_path, split="train")
     else:
-        # Supports: (1) instruction/response JSON, (2) pre-formatted messages (multi-turn; no re-formatting)
-        dataset = load_and_prepare_dataset(
-            dataset_name=dataset_cfg["name"],
+        dataset = load_dataset(
+            dataset_cfg.get("name", "json"),
+            path=dataset_path,
             split=dataset_cfg.get("split", "train"),
-            instruction_column=dataset_cfg.get("instruction_column", "instruction"),
-            response_column=dataset_cfg.get("response_column", "response"),
-            dataset_path=dataset_path,
-            data_files=dataset_cfg.get("data_files"),
         )
-        validation_ratio = float(training_cfg.get("validation_ratio", 0))
-        if validation_ratio > 0 and validation_ratio < 1:
-            split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
-            dataset = split["train"]
-            eval_dataset = split["test"]
-            print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
-        else:
-            eval_dataset = None
-            if validation_ratio != 0:
-                print("validation_ratio must be in (0, 1); skipping validation.")
 
-        if "messages" in dataset.column_names:
-            # Pre-formatted multi-turn: use messages as-is, only apply chat template (no override)
-            print("Using pre-formatted 'messages' (chat template only, no system/user/assistant override).")
-            formatting_func = lambda ex: messages_to_text(ex, tokenizer)
-        else:
-            system_prompt = dataset_cfg.get("system_prompt", "You are a helpful assistant.")
-            instance_template = dataset_cfg.get("instance_template")
-            format_response_agent_style = dataset_cfg.get("format_response_agent_style", False)
+    def _map_messages_to_text(example):
+        return {"text": messages_to_text(example, tokenizer)}
 
-            def formatting_func(example):
-                return format_instruction(
-                    example,
-                    tokenizer,
-                    system_prompt=system_prompt,
-                    instance_template=instance_template,
-                    format_response_agent_style=format_response_agent_style,
-                )
+    dataset = dataset.map(_map_messages_to_text, remove_columns=[], desc="Building text from messages")
+
+    eval_dataset = None
+    validation_ratio = float(training_cfg.get("validation_ratio", 0))
+    if validation_ratio > 0 and validation_ratio < 1:
+        split = dataset.train_test_split(test_size=validation_ratio, seed=training_cfg.get("seed", 42))
+        dataset = split["train"]
+        eval_dataset = split["test"]
+        print(f"Train/val split: {len(dataset)} train, {len(eval_dataset)} validation ({validation_ratio:.0%} val)")
 
     # Wandb: set env from config so report_to="wandb" uses correct project/entity
     wandb_project = training_cfg.get("wandb_project")
@@ -268,10 +223,7 @@ def main(config_path: str | None = None):
         processing_class=tokenizer,
         callbacks=callbacks,
     )
-    if use_text_column:
-        trainer_kw["dataset_text_field"] = "text"
-    else:
-        trainer_kw["formatting_func"] = formatting_func
+    trainer_kw["dataset_text_field"] = "text"
     trainer = SFTTrainer(**trainer_kw)
 
     trainer.train()

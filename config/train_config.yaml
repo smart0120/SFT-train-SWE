@@ -15,20 +15,10 @@ model:
   use_4bit_quantization: false
   torch_dtype: "bfloat16"
 
-# --- Dataset ---
+# --- Dataset (always messages: list of {role, content}; text built via chat template) ---
 dataset:
-  name: "your_dataset_name"
+  name: "json"
   split: "train"
-  instruction_column: "instruction"
-  response_column: "response"
-  system_prompt: "You are a helpful assistant."
-  # Load system/instance templates from SWE-SYNTH config (agent section)
-  swe_synth_config_path: "affinetes/environments/SWE-SYNTH/config.yaml"
-  format_response_agent_style: true
-  # use_text_column: true = use "text" column (or build from "messages" with chat template only, no override).
-  # For datasets with "messages": system/user/assistant are used as-is; only tokenizer chat template is applied (no config system_prompt or re-formatting).
-  use_text_column: false
-  # SFTConfig.assistant_only_loss: true = compute loss only on assistant responses (ignores user/system tokens). Use with conversational/messages datasets.
   assistant_only_loss: true
 
 # --- LoRA (4B, small dataset: lower rank to reduce overfitting) ---
@@ -62,7 +52,7 @@ training:
   save_total_limit: 3
   optim: "adamw_torch"
   max_seq_length: 4096   # Lower for H100 80GB; increase if no OOM
-  truncation_side: "right"
+  truncation_side: "left"
   packing: false
   report_to: "wandb"
   # Validation: split train data by ratio and run eval every eval_steps
