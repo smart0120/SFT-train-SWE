@@ -86,17 +86,20 @@ def chat_fn(
         return "Please enter a message."
     messages = build_messages(system_prompt or "", history, user_msg.strip())
     try:
+        do_sample = temperature > 0
         reply = generate_chat(
             MODEL,
             TOKENIZER,
             messages,
-            max_new_tokens=max_new_tokens,
-            do_sample=temperature > 0,
-            temperature=max(0.01, temperature),
+            max_new_tokens=max(1, int(max_new_tokens)),
+            do_sample=do_sample,
+            temperature=max(0.01, float(temperature)) if do_sample else 0.7,
         )
-        return reply or "(empty reply)"
+        return (reply or "").strip() or "(empty reply)"
     except Exception as e:
-        return f"Error: {e}"
+        import traceback
+        tb = traceback.format_exc()
+        return f"**Error:** {e}\n\n```\n{tb}\n```"
 
 
 def load_model_fn(model_path: str) -> str:

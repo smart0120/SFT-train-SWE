@@ -62,6 +62,13 @@ def load_model_for_inference(
     raise ValueError("Provide either model_path (merged) or base_model_id + adapter_path")
 
 
+def _inference_device(model):
+    """Device for input tensors when using device_map='auto' (model may span devices)."""
+    if hasattr(model, "device") and model.device is not None:
+        return model.device
+    return next(model.parameters()).device
+
+
 def generate(
     model,
     tokenizer,
@@ -70,19 +77,26 @@ def generate(
     do_sample: bool = True,
     temperature: float = 0.7,
 ):
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token
     messages = [{"role": "user", "content": prompt}]
+    device = _inference_device(model)
     inputs = tokenizer.apply_chat_template(
         messages,
         return_tensors="pt",
         add_generation_prompt=True,
-    ).to(model.device)
-    outputs = model.generate(
-        inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=do_sample,
-        temperature=temperature,
-        pad_token_id=tokenizer.eos_token_id,
     )
+    if not isinstance(inputs, torch.Tensor):
+        inputs = torch.tensor(inputs, dtype=torch.long)
+    inputs = inputs.to(device)
+    with torch.inference_mode():
+        outputs = model.generate(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=max(1e-5, temperature),
+            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+        )
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
@@ -100,18 +114,23 @@ def generate_chat(
     """
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
+    device = _inference_device(model)
     inputs = tokenizer.apply_chat_template(
         messages,
         return_tensors="pt",
         add_generation_prompt=True,
-    ).to(model.device)
-    outputs = model.generate(
-        inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=do_sample,
-        temperature=temperature,
-        pad_token_id=tokenizer.eos_token_id,
     )
+    if not isinstance(inputs, torch.Tensor):
+        inputs = torch.tensor(inputs, dtype=torch.long)
+    inputs = inputs.to(device)
+    with torch.inference_mode():
+        outputs = model.generate(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=max(1e-5, temperature),
+            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+        )
     # Decode only the new tokens (assistant reply)
     new_tokens = outputs[0][inputs.shape[1] :]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
